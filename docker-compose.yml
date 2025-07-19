@@ -1,10 +1,33 @@
+version: '3.8'
+
 services:
+  db:
+    image: mysql:5.7
+    container_name: yii2_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: yii2app
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: rootpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
   php:
     image: yiisoftware/yii2-php:7.4-apache
+    container_name: yii2_php
     ports:
       - "8000:80"
     volumes:
       - ./src:/app
     depends_on:
       - db
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
     command: /bin/bash -c "composer install && php yii migrate --interactive=0 && apache2-foreground"
+
+volumes:
+  db_data:
