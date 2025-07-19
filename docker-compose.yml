@@ -1,0 +1,10 @@
+services:
+  php:
+    image: yiisoftware/yii2-php:7.4-apache
+    ports:
+      - "8000:80"
+    volumes:
+      - ./src:/app
+    depends_on:
+      - db
+    command: /bin/bash -c "composer install && php yii migrate --interactive=0 && apache2-foreground"
