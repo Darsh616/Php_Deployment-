@@ -1,0 +1,121 @@
+pipeline {
+    agent any
+
+    environment {
+        ENV = 'local'
+        SRC_ROOT = './src'
+        COMPOSE_PROJECT_NAME = 'php_yii2_project'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'part-3', url: 'https://github.com/Darsh616/Php_Deployment-.git'
+            }
+        }
+
+        stage('Inject DB Credentials') {
+            steps {
+                withCredentials([
+                    usernamePassword(credentialsId: 'DB_USER', usernameVariable: 'DB_USER_TEMP', passwordVariable: 'DB_PASSWORD_TEMP')
+                ]) {
+                    script {
+                        env.DB_USER = DB_USER_TEMP
+                        env.DB_PASSWORD = DB_PASSWORD_TEMP
+
+                        writeFile file: ".env", text: """
+ENV=local
+SRC_ROOT=./src
+YII_DEBUG=true
+YII_ENV=dev
+DB_DSN=mysql:host=db;dbname=yii2app
+DB_USER=${env.DB_USER}
+DB_PASSWORD=${env.DB_PASSWORD}
+"""
+                        echo "✅ .env file created with injected credentials and pipeline environment variables set."
+                    }
+                }
+            }
+        }
+
+        stage('Build and Start Containers') {
+            steps {
+                sh '''
+                    docker-compose down || true
+                    docker-compose build
+                    docker-compose up -d
+                '''
+            }
+        }
+
+        stage('Wait for DB') {
+            steps {
+                script {
+                    def retries = 10
+                    def waitTime = 3
+                    def dbReady = false
+                    for (int i = 0; i < retries; i++) {
+                        echo "Checking if DB is ready (attempt ${i+1}/${retries})..."
+                        def result = sh(script: "docker-compose exec db mysqladmin ping -u${env.DB_USER} -p${env.DB_PASSWORD}", returnStatus: true)
+                        if (result == 0) {
+                            echo "✅ DB is ready!"
+                            dbReady = true
+                            break
+                        }
+                        echo "DB not ready yet, waiting ${waitTime} seconds..."
+                        sleep(waitTime)
+                    }
+                    if (!dbReady) {
+                        error("DB is not ready after waiting, aborting pipeline.")
+                    }
+                }
+            }
+        }
+
+        stage('Run DB Migrations') {
+            steps {
+                echo "Skipping DB migration stage as requested."
+                // sh 'docker-compose exec php php yii migrate --interactive=0'
+            }
+        }
+
+        stage('Run Unit Tests (Mock)') {
+            steps {
+                script {
+                    echo "🧪 Running unit tests (mocked)..."
+                    def testStatus = sh(script: 'echo "Simulating unit test..." && exit 1', returnStatus: true)
+
+                    if (testStatus != 0) {
+                        echo "⚠️ Unit tests failed, but continuing deployment..."
+                        currentBuild.result = 'UNSTABLE'
+                    } else {
+                        echo "✅ All unit tests passed."
+                    }
+                }
+            }
+        }
+
+       
+
+        stage('Application Status') {
+            steps {
+                sh 'docker-compose ps'
+                sh 'docker-compose logs --tail=20 php'
+                echo '✅ Application is up and running!'
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo '❌ Deployment failed!'
+            sh 'docker-compose down || true'
+        }
+        success {
+            echo '🎉 Deployment succeeded!'
+        }
+        unstable {
+            echo '⚠️ Pipeline completed with some warnings (e.g., test failures).'
+        }
+    }
+}
